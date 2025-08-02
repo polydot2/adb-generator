@@ -1,0 +1,16 @@
+{
+    "intentName": "fr.laposte.dsibr.intent.digitization",
+    "prefix": "fr.laposte.dsibr.digitization.",
+    "params": [
+        {
+            "key": "caller",
+            "value": "{ \"appId\": \"ModuleCaller\", \"appName\": \"ModuleCaller\", \"packageName\": \"fr.laposte.dsibr.modulecaller\" }",
+            "type": "JSON"
+        },
+        {
+            "key": "outputDocumentCypherKey",
+            "value": "ABCDEFGHIJKLMNOPQRSTUVWXYZ012345",
+            "type": "STRING"
+        }
+    ]
+}

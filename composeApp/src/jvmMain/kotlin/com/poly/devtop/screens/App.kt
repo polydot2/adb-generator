@@ -2,7 +2,10 @@ package com.poly.devtop.screens
 
 import androidx.compose.desktop.ui.tooling.preview.Preview
 import androidx.compose.foundation.layout.*
-import androidx.compose.material3.*
+import androidx.compose.material3.Button
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Text
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -17,7 +20,6 @@ val jiraToRepoMap = mapOf(
     "ABC" to File("Projets/MyProject1"),
     "XYZ" to File("Projets/MyProject2")
 )
-
 
 @Composable
 @Preview

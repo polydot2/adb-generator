@@ -29,6 +29,8 @@ kotlin {
             implementation(libs.kotlinx.serialization.json)
 
             implementation(libs.kotlinx.coroutines.core)
+            implementation(libs.kotlinx.coroutines.swing)
+            implementation(libs.kotlinx.coroutines.desktop)
 
             implementation(libs.jgit)
 
@@ -47,6 +49,21 @@ kotlin {
     }
 }
 
+compose.desktop {
+    application {
+        nativeDistributions {
+            macOS {
+                iconFile.set(project.file("icon.icns"))
+            }
+            windows {
+                iconFile.set(project.file("icon.ico"))
+            }
+            linux {
+                iconFile.set(project.file("icon.png"))
+            }
+        }
+    }
+}
 
 compose.desktop {
     application {
@@ -59,8 +76,14 @@ compose.desktop {
             appResourcesRootDir.set(project.file("src/desktopMain/resources")) // Dossier des ressources
             windows {
                 dirChooser = true // Active le sélecteur de dossiers
-                iconFile.set(project.file("src/desktopMain/resources/icon.ico")) // Icône de l'application (optionnel)
+                iconFile.set(project.file("icon.ico"))
                 menuGroup = "Poly Devtop" // Groupe dans le menu Démarrer
+            }
+            macOS {
+                iconFile.set(project.file("icon.icns"))
+            }
+            linux {
+                iconFile.set(project.file("icon.png"))
             }
             outputBaseDir.set(file("build/dist")) // Dossier de sortie
             modules("kotlinx-serialization-json") // Inclut kotlinx.serialization pour les JSON
