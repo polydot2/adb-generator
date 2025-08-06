@@ -20,14 +20,10 @@ import androidx.compose.ui.draganddrop.*
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.unit.dp
-import kotlinx.serialization.Serializable
+import com.poly.devtop.data.Tag
 import java.awt.datatransfer.DataFlavor
 import java.awt.datatransfer.Transferable
 import java.awt.datatransfer.UnsupportedFlavorException
-import java.io.File
-
-@Serializable
-data class Tag(val name: String, val configPaths: List<String> = emptyList())
 
 // Implémentation personnalisée de Transferable pour transférer un chemin de fichier
 private class StringTransferable(private val text: String) : Transferable {
@@ -50,18 +46,19 @@ private class StringTransferable(private val text: String) : Transferable {
 @Composable
 fun TagManager(
     tags: List<Tag>,
-    configFiles: List<File>,
+    configFiles: List<String>,
     onCreateTag: (String) -> Unit,
     onEditTag: (Tag, String) -> Unit,
     onDeleteTag: (Tag) -> Unit,
-    onMoveConfigToTag: (File, Tag) -> Unit,
+    onMoveConfigToTag: (String, Tag) -> Unit,
     modifier: Modifier = Modifier
 ) {
     var showCreateTagDialog by remember { mutableStateOf(false) }
     var showEditTagDialog by remember { mutableStateOf<Tag?>(null) }
     var newTagName by remember { mutableStateOf(TextFieldValue("")) }
-    var draggedConfig by remember { mutableStateOf<File?>(null) }
+    var draggedConfig by remember { mutableStateOf<String?>(null) }
     var dropTargetTag by remember { mutableStateOf<Tag?>(null) }
+    var isExpanded by remember { mutableStateOf(false) }
 
     Column(modifier = modifier.fillMaxWidth()) {
         // Bouton pour créer un nouveau tag
@@ -78,7 +75,6 @@ fun TagManager(
             verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
             items(tags) { tag ->
-                var isExpanded by remember { mutableStateOf(false) }
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -144,7 +140,7 @@ fun TagManager(
                                             }
                                             println("Dropped $path on ${tag.name}")
                                             return if (path != null) {
-                                                onMoveConfigToTag(File(path), tag)
+                                                onMoveConfigToTag(path, tag)
                                                 draggedConfig = null
                                                 dropTargetTag = null
                                                 true
@@ -176,12 +172,11 @@ fun TagManager(
                             verticalArrangement = Arrangement.spacedBy(4.dp)
                         ) {
                             tag.configPaths.forEach { path ->
-                                val configFile = File(path)
                                 Row(
                                     modifier = Modifier
                                         .fillMaxWidth()
                                         .background(
-                                            color = if (draggedConfig == configFile) MaterialTheme.colorScheme.secondary.copy(
+                                            color = if (draggedConfig == path) MaterialTheme.colorScheme.secondary.copy(
                                                 alpha = 0.1f
                                             )
                                             else MaterialTheme.colorScheme.background,
@@ -190,13 +185,13 @@ fun TagManager(
                                         .padding(8.dp)
                                         .dragAndDropSource(
                                             transferData = {
-                                                draggedConfig = configFile
-                                                println("Started dragging ${configFile.name}")
+                                                draggedConfig = path
+                                                println("Started dragging ${path}")
                                                 DragAndDropTransferData(
-                                                    transferable = DragAndDropTransferable(StringTransferable(configFile.path)),
+                                                    transferable = DragAndDropTransferable(StringTransferable(path)),
                                                     supportedActions = listOf(DragAndDropTransferAction.Move),
                                                     onTransferCompleted = { action ->
-                                                        println("Transfer completed for ${configFile.name}: $action")
+                                                        println("Transfer completed for ${path}: $action")
                                                         draggedConfig = null
                                                         dropTargetTag = null
                                                     }
@@ -204,7 +199,7 @@ fun TagManager(
                                             }
                                         )
                                 ) {
-                                    Text(configFile.nameWithoutExtension)
+                                    Text(path)
                                     Spacer(Modifier.weight(1f))
                                     Icon(
                                         Icons.Default.DragHandle,
@@ -270,7 +265,7 @@ fun TagManager(
                                             }
                                             println("Dropped $path on Non assignées")
                                             return if (path != null) {
-                                                onMoveConfigToTag(File(path), Tag(""))
+                                                onMoveConfigToTag(path, Tag(""))
                                                 draggedConfig = null
                                                 dropTargetTag = null
                                                 true
@@ -300,7 +295,7 @@ fun TagManager(
                             verticalArrangement = Arrangement.spacedBy(4.dp)
                         ) {
                             val unassignedConfigs = configFiles.filter { file ->
-                                tags.none { tag -> tag.configPaths.contains(file.path) }
+                                tags.none { tag -> tag.configPaths.contains(file) }
                             }
                             unassignedConfigs.forEach { configFile ->
                                 Row(
@@ -317,12 +312,12 @@ fun TagManager(
                                         .dragAndDropSource(
                                             transferData = {
                                                 draggedConfig = configFile
-                                                println("Started dragging ${configFile.name}")
+                                                println("Started dragging ${configFile}")
                                                 DragAndDropTransferData(
-                                                    transferable = DragAndDropTransferable(StringTransferable(configFile.path)),
+                                                    transferable = DragAndDropTransferable(StringTransferable(configFile)),
                                                     supportedActions = listOf(DragAndDropTransferAction.Move),
                                                     onTransferCompleted = { action ->
-                                                        println("Transfer completed for ${configFile.name}: $action")
+                                                        println("Transfer completed for ${configFile}: $action")
                                                         draggedConfig = null
                                                         dropTargetTag = null
                                                     }
@@ -330,7 +325,7 @@ fun TagManager(
                                             }
                                         )
                                 ) {
-                                    Text(configFile.nameWithoutExtension)
+                                    Text(configFile)
                                     Spacer(Modifier.weight(1f))
                                     Icon(
                                         Icons.Default.DragHandle,

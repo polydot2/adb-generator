@@ -1,5 +1,6 @@
 package com.poly.devtop.screens
 
+import Storage
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -16,40 +17,13 @@ import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.unit.dp
-import com.poly.devtop.component.Tag
-import com.poly.devtop.component.TagManager
-import kotlinx.coroutines.Dispatchers
+import com.poly.devtop.data.*
+import com.poly.devtop.multi.Adb
+import com.poly.devtop.multi.Clipboard
+import com.poly.devtop.multi.FilePicker
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
-import kotlinx.serialization.Serializable
-import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
-import java.awt.FileDialog
-import java.awt.Frame
-import java.awt.Toolkit
-import java.awt.datatransfer.StringSelection
-import java.io.BufferedReader
-import java.io.File
-import java.io.InputStreamReader
-import java.util.*
-
-enum class ParamType(val flag: String) {
-    STRING("--es"), BOOLEAN("--ez"), INT("--ei"), ARRAY_STRING("--es"), JSON("--es")
-}
-
-@Serializable
-data class Param(val key: String, val value: String, val isVisible: Boolean, val type: ParamType)
-
-@Serializable
-data class JsonParam(val key: String, val value: String, val type: String, val isVisible: Boolean = true)
-
-@Serializable
-data class Config(val intentName: String, val prefix: String, val params: List<JsonParam>)
-
-@Serializable
-data class JsonImport(val key: String, val value: String? = null)
-
 
 @Composable
 fun PostAdbScreen() {
@@ -61,13 +35,16 @@ fun PostAdbScreen() {
     var showJsonDialog by remember { mutableStateOf(false) }
     var showConfigDialog by remember { mutableStateOf(false) }
     var showDeleteConfirmDialog by remember { mutableStateOf(false) }
-    var fileToDelete by remember { mutableStateOf<File?>(null) }
+    var showSaveConfirmDialog by remember { mutableStateOf(false) } // Nouveau dialogue
+    var fileToDelete by remember { mutableStateOf<String?>(null) }
+    var configToLoad by remember { mutableStateOf<String?>(null) } // Config à charger après confirmation
     var jsonInput by remember { mutableStateOf(TextFieldValue("")) }
     var jsonError by remember { mutableStateOf("") }
     var configError by remember { mutableStateOf("") }
-    var currentConfigFile by remember { mutableStateOf<File?>(null) }
+    var currentConfigFile by remember { mutableStateOf<String?>(null) }
     var isModified by remember { mutableStateOf(false) }
-    var configFiles by remember { mutableStateOf(emptyList<File>()) } // Liste des fichiers pour rafraîchissement
+    var configFiles by remember { mutableStateOf(emptyList<String>()) }
+    var selectedConfig by remember { mutableStateOf<String?>(null) }
     val scrollState = rememberScrollState()
     var showCsvDialog by remember { mutableStateOf(false) }
     var csvInput by remember { mutableStateOf(TextFieldValue("")) }
@@ -75,30 +52,18 @@ fun PostAdbScreen() {
     var showToast by remember { mutableStateOf(false) }
     var toastMessage by remember { mutableStateOf("") }
     val scope = rememberCoroutineScope()
-    var logCatListening by remember { mutableStateOf(false) } // État pour suivre si la coroutine tourne
+    var logCatListening by remember { mutableStateOf(false) }
     var resultFromApk by remember { mutableStateOf("") }
 
-    // Dans PostAdbScreen
-    var tags by remember { mutableStateOf(listOf<Tag>()) }
-
-    // Dossier pour sauvegarder les configurations
-    val configDir = File("configs").apply { mkdirs() }
-
-    // Charge les tags au démarrage
+    // Charge les configs au démarrage
     LaunchedEffect(Unit) {
-        val tagDir = File("tags").apply { mkdirs() }
-        tags = tagDir.listFiles { _, name -> name.endsWith(".json") }?.map { file ->
-            Json.decodeFromString<Tag>(file.readText())
-        }?.toList() ?: emptyList()
-
-        // load configFile at start
-        configFiles = configDir.listFiles { _, name -> name.endsWith(".json") }?.toList() ?: emptyList()
+        configFiles = Storage.listConfigs()
     }
 
-    // Mettre à jour la liste des fichiers à l'ouverture de la popup
+    // Mettre à jour la liste des configs à l'ouverture de la popup
     LaunchedEffect(showConfigDialog) {
         if (showConfigDialog) {
-            configFiles = configDir.listFiles { _, name -> name.endsWith(".json") }?.toList() ?: emptyList()
+            configFiles = Storage.listConfigs()
         }
     }
 
@@ -112,9 +77,9 @@ fun PostAdbScreen() {
 
     // Vérifier si la configuration a été modifiée
     LaunchedEffect(intentName, prefix, params, configName) {
-        if (currentConfigFile != null && configName.text == currentConfigFile?.nameWithoutExtension) {
+        if (currentConfigFile != null && configName.text == currentConfigFile) {
             try {
-                val savedConfig = Json.decodeFromString<Config>(currentConfigFile?.readText() ?: "")
+                val savedConfig = Storage.loadConfig(currentConfigFile!!)
                 val currentConfig = Config(
                     intentName = intentName.text,
                     prefix = prefix.text,
@@ -129,51 +94,63 @@ fun PostAdbScreen() {
         }
     }
 
+    // Fonction pour charger une configuration
+    val loadConfig: (String) -> Unit = { config ->
+        scope.launch {
+            try {
+                val loadedConfig = Storage.loadConfig(config)
+                if (loadedConfig != null) {
+                    intentName = TextFieldValue(loadedConfig.intentName)
+                    prefix = TextFieldValue(loadedConfig.prefix)
+                    params = loadedConfig.params.map { jsonParam ->
+                        val type = try {
+                            ParamType.valueOf(jsonParam.type.uppercase())
+                        } catch (e: IllegalArgumentException) {
+                            ParamType.STRING
+                        }
+                        Param(jsonParam.key, jsonParam.value, jsonParam.isVisible, type)
+                    }
+                    configName = TextFieldValue(config)
+                    currentConfigFile = config
+                    configError = ""
+                    isModified = false
+                    resultFromApk = ""
+                    logCatListening = false
+                    selectedConfig = config
+                }
+            } catch (e: Exception) {
+                configError = "Erreur lors du chargement de $config : ${e.message}"
+            }
+        }
+    }
+
     MaterialTheme {
         Box(
             modifier = Modifier.padding(vertical = 4.dp),
-            contentAlignment = Alignment.Center // Centre le contenu principal
+            contentAlignment = Alignment.Center
         ) {
             Row {
-                // tag
+                // ConfigManager
                 Column(Modifier.weight(0.1f).padding(horizontal = 4.dp)) {
-                    TagManager(
-                        tags = tags,
-                        configFiles = configFiles, // Passe la liste existante des fichiers de configuration
-                        onCreateTag = { name ->
-                            tags = tags + Tag(name)
-                            File("tags/$name.json").writeText(Json.encodeToString(Tag(name)))
-                        },
-                        onEditTag = { tag, newName ->
-                            tags = tags.map { if (it == tag) Tag(newName, tag.configPaths) else it }
-                            File("tags/${tag.name}.json").delete()
-                            File("tags/$newName.json").writeText(Json.encodeToString(Tag(newName, tag.configPaths)))
-                        },
-                        onDeleteTag = { tag ->
-                            tags = tags - tag
-                            File("tags/${tag.name}.json").delete()
-                        },
-                        onMoveConfigToTag = { configFile, targetTag ->
-                            tags = tags.map { tag ->
-                                if (tag == targetTag) {
-                                    // Ajoute la config au tag cible (si targetTag n'est pas vide)
-                                    Tag(
-                                        tag.name,
-                                        if (targetTag.name.isNotEmpty()) (tag.configPaths + configFile.path).distinct() else tag.configPaths
-                                    )
-                                } else {
-                                    // Retire la config des autres tags
-                                    Tag(tag.name, tag.configPaths.filter { it != configFile.path })
-                                }
+                    ConfigManager(
+                        configFiles = configFiles,
+                        selectedConfig = selectedConfig,
+                        onConfigClick = { config ->
+                            if (isModified && config != currentConfigFile) {
+                                // Afficher le dialogue de confirmation si la config est modifiée
+                                configToLoad = config
+                                showSaveConfirmDialog = true
+                            } else {
+                                // Charger directement si non modifié ou même config
+                                loadConfig(config)
                             }
-                            // Sauvegarde tous les tags
-                            tags.forEach { File("tags/${it.name}.json").writeText(Json.encodeToString(it)) }
                         },
+                        isModified = isModified,
                         modifier = Modifier.padding(top = 8.dp)
                     )
                 }
 
-                // screen
+                // Screen
                 Column(
                     modifier = Modifier
                         .padding(horizontal = 4.dp)
@@ -188,15 +165,20 @@ fun PostAdbScreen() {
                     ) {
                         Text("Générateur de commande ADB", style = MaterialTheme.typography.headlineMedium)
                         Spacer(Modifier.weight(1f))
-                        Button(
-                            onClick = {
-                                installApk()
-                            }
-                        ) {
-                            Text("Install middleMan.apk")
-                        }
+//                        Button(
+//                            onClick = {
+//                                scope.launch {
+//                                    val result = Adb.installApk()
+//                                    toastMessage = result
+//                                    showToast = true
+//                                    delay(4000)
+//                                    showToast = false
+//                                }
+//                            }
+//                        ) {
+//                            Text("Install middleMan.apk")
+//                        }
                     }
-
 
                     // Boutons pour sauvegarder et charger les configurations
                     Column(
@@ -211,34 +193,26 @@ fun PostAdbScreen() {
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             Text("Configuration", style = MaterialTheme.typography.titleLarge)
-
                             Button(
                                 onClick = {
                                     if (configName.text.isNotBlank()) {
-                                        try {
-                                            val config = Config(
-                                                intentName = intentName.text,
-                                                prefix = prefix.text,
-                                                params = params.map {
-                                                    JsonParam(
-                                                        it.key,
-                                                        it.value,
-                                                        it.type.name,
-                                                        it.isVisible
-                                                    )
-                                                }
-                                            )
-                                            val json = Json { prettyPrint = true }.encodeToString(config)
-                                            val file = File(configDir, "${configName.text}.json")
-                                            file.writeText(json)
-                                            currentConfigFile = file
-                                            configError = ""
-                                            isModified = false
-                                            configFiles =
-                                                configDir.listFiles { _, name -> name.endsWith(".json") }?.toList()
-                                                    ?: emptyList()
-                                        } catch (e: Exception) {
-                                            configError = "Erreur lors de la sauvegarde : ${e.message}"
+                                        scope.launch {
+                                            try {
+                                                val config = Config(
+                                                    intentName = intentName.text,
+                                                    prefix = prefix.text,
+                                                    params = params.map {
+                                                        JsonParam(it.key, it.value, it.type.name, it.isVisible)
+                                                    }
+                                                )
+                                                Storage.saveConfig(configName.text, config)
+                                                currentConfigFile = configName.text
+                                                configError = ""
+                                                isModified = false
+                                                configFiles = Storage.listConfigs()
+                                            } catch (e: Exception) {
+                                                configError = "Erreur lors de la sauvegarde : ${e.message}"
+                                            }
                                         }
                                     } else {
                                         configError = "Le nom de la configuration ne peut pas être vide"
@@ -251,13 +225,13 @@ fun PostAdbScreen() {
                             Button(
                                 onClick = { showConfigDialog = true }
                             ) {
-                                Text("Charger")
+                                Text("Gérer les configs")
                             }
                             Spacer(Modifier.weight(1f))
                             Button(
                                 onClick = {
                                     configName = TextFieldValue("")
-                                    intentName = TextFieldValue("android.intent.action.VIEW")
+                                    intentName = TextFieldValue("")
                                     prefix = TextFieldValue("")
                                     params = listOf()
                                     adbCommand = ""
@@ -266,6 +240,7 @@ fun PostAdbScreen() {
                                     configError = ""
                                     resultFromApk = ""
                                     logCatListening = false
+                                    selectedConfig = null
                                 }
                             ) {
                                 Text("Clear")
@@ -299,11 +274,12 @@ fun PostAdbScreen() {
                         }
                     }
 
-
                     Column(
-                        Modifier.background(color = MaterialTheme.colorScheme.surface, shape = RoundedCornerShape(8.dp))
-                            .padding(16.dp),
-                        verticalArrangement = Arrangement.spacedBy(8.dp),
+                        Modifier.background(
+                            color = MaterialTheme.colorScheme.surface,
+                            shape = RoundedCornerShape(8.dp)
+                        ).padding(16.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
                         Text("Intent", style = MaterialTheme.typography.titleLarge)
 
@@ -312,7 +288,7 @@ fun PostAdbScreen() {
                             value = intentName,
                             singleLine = true,
                             onValueChange = { intentName = it },
-                            label = { Text("Nom de l'intent (ex. android.intent.action.VIEW)") },
+                            label = { Text("Nom de l'intent") },
                             modifier = Modifier.fillMaxWidth()
                         )
 
@@ -321,9 +297,84 @@ fun PostAdbScreen() {
                             value = prefix,
                             singleLine = true,
                             onValueChange = { prefix = it },
-                            label = { Text("Préfixe des paramètres (ex. extra_)") },
+                            label = { Text("Préfixe des paramètres") },
                             modifier = Modifier.fillMaxWidth()
                         )
+                    }
+
+                    Column(
+                        Modifier.background(
+                            color = MaterialTheme.colorScheme.surface,
+                            shape = RoundedCornerShape(8.dp)
+                        ).padding(16.dp)
+                    ) {
+                        // Afficher la commande ADB
+                        if (adbCommand.isNotEmpty()) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+//                                Text(
+//                                    text = adbCommand,
+//                                    modifier = Modifier.weight(1f),
+//                                    color = MaterialTheme.colorScheme.primary
+//                                )
+                                IconButton(
+                                    onClick = {
+                                        scope.launch {
+                                            Clipboard.copyToClipboard(adbCommand)
+                                        }
+                                    }
+                                ) {
+                                    Icon(Icons.Default.ContentCopy, contentDescription = "Copier")
+                                }
+                                IconButton(
+                                    onClick = {
+                                        scope.launch {
+                                            adbCommand = generateAdbCommand(
+                                                intentName.text,
+                                                prefix.text,
+                                                params.filter { it.isVisible && it.key.isNotBlank() })
+                                            val output = Adb.executeCommand(adbCommand)
+                                            toastMessage = output
+                                            showToast = true
+                                            delay(4000)
+                                            showToast = false
+                                        }
+                                    }
+                                ) {
+                                    Icon(Icons.Default.PlayArrow, contentDescription = "Lancer")
+                                }
+                                Text(
+                                    text = adbCommand,
+                                    modifier = Modifier.weight(1f),
+                                    color = MaterialTheme.colorScheme.primary
+                                )
+//                                IconButton(
+//                                    onClick = {
+//                                        scope.launch {
+//                                            adbCommand = generateAdbCommand(
+//                                                intentName.text,
+//                                                prefix.text,
+//                                                params.filter { it.isVisible && it.key.isNotBlank() })
+//                                            resultFromApk = ""
+//                                            val (newCommand, uid) = Adb.executeCommandWithMiddleApk(
+//                                                adbCommand,
+//                                                intentName.text
+//                                            )
+//                                            Adb.executeCommand(newCommand)
+//                                            logCatListening = true
+//                                            val logcatResult = Adb.listenLogcat(uid)
+//                                            logCatListening = false
+//                                            resultFromApk = logcatResult
+//                                        }
+//                                    }
+//                                ) {
+//                                    Icon(Icons.Default.PlayForWork, contentDescription = "Lancer a travers middleMan")
+//                                }
+                            }
+                        }
                     }
 
                     // Paramètres clé-valeur
@@ -333,27 +384,15 @@ fun PostAdbScreen() {
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Text("Paramètres", style = MaterialTheme.typography.titleLarge)
-
-                        // Bouton pour ajouter un paramètre
                         Button(
                             modifier = Modifier.focusProperties { canFocus = false },
-                            onClick = { params = params + Param("", "", true, ParamType.STRING) },
+                            onClick = { params = params + Param("", "", true, ParamType.STRING) }
                         ) {
                             Text("Ajouter paramètre")
                         }
-
-                        // Bouton pour ouvrir la popup d'importation JSON
-//                    Button(
-//                        modifier = Modifier.focusProperties { canFocus = false },
-//                        onClick = { showJsonDialog = true },
-//                    ) {
-//                        Text("Importer JSON")
-//                    }
-
-                        // Bouton pour ouvrir la popup d'importation CSV
                         Button(
                             modifier = Modifier.focusProperties { canFocus = false },
-                            onClick = { showCsvDialog = true },
+                            onClick = { showCsvDialog = true }
                         ) {
                             Text("Importer CSV")
                         }
@@ -437,7 +476,8 @@ fun PostAdbScreen() {
                                     }
                                 }
                                 Box(
-                                    modifier = Modifier.focusProperties { canFocus = false }
+                                    modifier = Modifier
+                                        .focusProperties { canFocus = false }
                                         .matchParentSize()
                                         .clickable(enabled = param.isVisible) { expanded = true }
                                 )
@@ -451,94 +491,6 @@ fun PostAdbScreen() {
                                 }
                             ) {
                                 Icon(Icons.Default.Delete, contentDescription = "Supprimer")
-                            }
-                        }
-                    }
-
-                    // Bouton pour générer la commande ADB
-//                Button(
-//                    onClick = {
-//                        adbCommand = generateAdbCommand(
-//                            intentName.text,
-//                            prefix.text,
-//                            params.filter { it.isVisible && it.key.isNotBlank() })
-//                    },
-//                    enabled = intentName.text.isNotBlank()
-//                ) {
-//                    Text("Générer commande ADB")
-//                }
-
-                    // Afficher la commande ADB
-                    if (adbCommand.isNotEmpty()) {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Text(
-                                text = "$adbCommand",
-                                modifier = Modifier.weight(1f),
-                                color = MaterialTheme.colorScheme.primary
-                            )
-                            IconButton(
-                                onClick = {
-                                    val clipboard = Toolkit.getDefaultToolkit().systemClipboard
-                                    clipboard.setContents(StringSelection(adbCommand), null)
-                                }
-                            ) {
-                                Icon(Icons.Default.ContentCopy, contentDescription = "Copier")
-                            }
-                            IconButton(
-                                onClick = {
-                                    scope.launch {
-                                        adbCommand = generateAdbCommand(
-                                            intentName.text,
-                                            prefix.text,
-                                            params.filter { it.isVisible && it.key.isNotBlank() })
-
-                                        // execute
-                                        val output = executeCommand(adbCommand)
-                                        toastMessage = output
-                                        showToast = true
-                                        delay(4000) // Afficher le Toast pendant 2 secondes
-                                        showToast = false
-                                    }
-                                }
-                            ) {
-                                Icon(Icons.Default.PlayArrow, contentDescription = "Lancer")
-                            }
-
-                            IconButton(
-                                onClick = {
-                                    scope.launch {
-                                        adbCommand = generateAdbCommand(
-                                            intentName.text,
-                                            prefix.text,
-                                            params.filter { it.isVisible && it.key.isNotBlank() })
-
-                                        // execute
-                                        resultFromApk = ""
-                                        val output = executeCommandWithMiddleAPK(adbCommand, intentName.text)
-                                        executeCommand(output.first)
-//                                        toastMessage = output.first
-//                                        showToast = true
-//                                        delay(4000) // Afficher le Toast pendant 2 secondes
-//                                        showToast = false
-
-                                        // Écouter les logs avec adb logcat
-                                        logCatListening = true
-                                        scope.launch(Dispatchers.IO) {
-                                            val logcatResult = listenLogcat(output.second) // listen with UID
-                                            withContext(Dispatchers.Main) {
-                                                println("Fin de l'écoute des logs")
-                                                logCatListening = false
-                                                resultFromApk = logcatResult
-                                            }
-                                        }
-                                    }
-                                }
-                            ) {
-                                Icon(Icons.Default.PlayForWork, contentDescription = "Lancer a travers middleMan")
                             }
                         }
                     }
@@ -575,10 +527,10 @@ fun PostAdbScreen() {
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .align(Alignment.BottomCenter) // Positionne le Toast en bas
+                        .align(Alignment.BottomCenter)
                         .padding(16.dp)
                         .background(Color.Black.copy(alpha = 0.8f))
-                        .padding(8.dp),
+                        .padding(8.dp)
                 ) {
                     Text(
                         text = toastMessage,
@@ -608,17 +560,17 @@ fun PostAdbScreen() {
                             }
                             Button(
                                 onClick = {
-                                    val fileDialog =
-                                        FileDialog(null as Frame?, "Choisir un fichier JSON", FileDialog.LOAD)
-                                    fileDialog.file = "*.json"
-                                    fileDialog.isVisible = true
-                                    val file = fileDialog.files.firstOrNull()
-                                    if (file != null) {
+                                    scope.launch {
                                         try {
-                                            jsonInput = TextFieldValue(file.readText())
-                                            jsonError = ""
+                                            val content = FilePicker.pickFile(".json")
+                                            if (content != null) {
+                                                jsonInput = TextFieldValue(content)
+                                                jsonError = ""
+                                            } else {
+                                                jsonError = "Aucun fichier sélectionné"
+                                            }
                                         } catch (e: Exception) {
-                                            jsonError = "Erreur lors de la lecture du fichier : ${e.message}"
+                                            jsonError = "Erreur lors de la sélection du fichier : ${e.message}"
                                         }
                                     }
                                 }
@@ -634,9 +586,7 @@ fun PostAdbScreen() {
                                     val jsonParams = Json.decodeFromString<List<JsonImport>>(jsonInput.text)
                                     params = jsonParams.map { jsonParam ->
                                         val type = try {
-                                            jsonParam.value?.let {
-                                                detectParamType(it)
-                                            } ?: ParamType.STRING
+                                            jsonParam.value?.let { detectParamType(it) } ?: ParamType.STRING
                                         } catch (e: IllegalArgumentException) {
                                             ParamType.STRING
                                         }
@@ -685,17 +635,17 @@ fun PostAdbScreen() {
                             }
                             Button(
                                 onClick = {
-                                    val fileDialog =
-                                        FileDialog(null as Frame?, "Choisir un fichier CSV", FileDialog.LOAD)
-                                    fileDialog.file = "*.csv"
-                                    fileDialog.isVisible = true
-                                    val file = fileDialog.files.firstOrNull()
-                                    if (file != null) {
+                                    scope.launch {
                                         try {
-                                            csvInput = TextFieldValue(file.readText())
-                                            csvError = ""
+                                            val content = FilePicker.pickFile(".csv")
+                                            if (content != null) {
+                                                csvInput = TextFieldValue(content)
+                                                csvError = ""
+                                            } else {
+                                                csvError = "Aucun fichier sélectionné"
+                                            }
                                         } catch (e: Exception) {
-                                            csvError = "Erreur lors de la lecture du fichier : ${e.message}"
+                                            csvError = "Erreur lors de la sélection du fichier : ${e.message}"
                                         }
                                     }
                                 }
@@ -739,64 +689,37 @@ fun PostAdbScreen() {
             if (showConfigDialog) {
                 AlertDialog(
                     onDismissRequest = { showConfigDialog = false },
-                    title = { Text("Charger une configuration") },
+                    title = { Text("Gérer les configurations") },
                     text = {
                         Column(
                             modifier = Modifier.fillMaxWidth().height(200.dp).verticalScroll(rememberScrollState()),
-                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                            verticalArrangement = Arrangement.spacedBy(4.dp)
                         ) {
                             if (configFiles.isEmpty()) {
                                 Text("Aucune configuration trouvée", color = MaterialTheme.colorScheme.onSurface)
                             } else {
                                 configFiles.forEach { file ->
-                                    Row(
-                                        modifier = Modifier.fillMaxWidth(),
-                                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                                        verticalAlignment = Alignment.CenterVertically
-                                    ) {
-                                        Button(
-                                            onClick = {
-                                                try {
-                                                    val config = Json.decodeFromString<Config>(file.readText())
-                                                    intentName = TextFieldValue(config.intentName)
-                                                    prefix = TextFieldValue(config.prefix)
-                                                    params = config.params.map { jsonParam ->
-                                                        val type = try {
-                                                            ParamType.valueOf(jsonParam.type.uppercase())
-                                                        } catch (e: IllegalArgumentException) {
-                                                            ParamType.STRING
-                                                        }
-                                                        Param(jsonParam.key, jsonParam.value, jsonParam.isVisible, type)
-                                                    }
-                                                    configName = TextFieldValue(file.nameWithoutExtension)
-                                                    currentConfigFile = file
-                                                    configError = ""
-                                                    isModified = false
-                                                    showConfigDialog = false
-                                                    resultFromApk = ""
-                                                    logCatListening = false
-                                                } catch (e: Exception) {
-                                                    configError =
-                                                        "Erreur lors du chargement de ${file.name} : ${e.message}"
+                                    Card(Modifier.height(48.dp).fillMaxWidth()) {
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth().padding(8.dp),
+                                            horizontalArrangement = Arrangement.SpaceBetween,
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            Text(file)
+                                            IconButton(
+                                                onClick = {
+                                                    fileToDelete = file
+                                                    showDeleteConfirmDialog = true
                                                 }
-                                            },
-                                            modifier = Modifier.weight(1f)
-                                        ) {
-                                            Text(file.nameWithoutExtension)
-                                        }
-                                        IconButton(
-                                            onClick = {
-                                                fileToDelete = file
-                                                showDeleteConfirmDialog = true
+                                            ) {
+                                                Icon(Icons.Default.Delete, contentDescription = "Supprimer $file")
                                             }
-                                        ) {
-                                            Icon(Icons.Default.Delete, contentDescription = "Supprimer ${file.name}")
                                         }
                                     }
                                 }
-                            }
-                            if (configError.isNotEmpty()) {
-                                Text(configError, color = MaterialTheme.colorScheme.error)
+                                if (configError.isNotEmpty()) {
+                                    Text(configError, color = MaterialTheme.colorScheme.error)
+                                }
                             }
                         }
                     },
@@ -809,30 +732,109 @@ fun PostAdbScreen() {
                 )
             }
 
+            // Popup de confirmation pour sauvegarder avant de charger
+            if (showSaveConfirmDialog && configToLoad != null) {
+                AlertDialog(
+                    onDismissRequest = {
+                        showSaveConfirmDialog = false
+                        configToLoad = null
+                    },
+                    title = { Text("Configuration modifiée") },
+                    text = { Text("La configuration actuelle a été modifiée. Voulez-vous sauvegarder avant de charger '${configToLoad}' ?") },
+                    confirmButton = {
+                        Button(
+                            onClick = {
+                                if (configName.text.isNotBlank()) {
+                                    scope.launch {
+                                        try {
+                                            // Sauvegarder la configuration actuelle
+                                            val config = Config(
+                                                intentName = intentName.text,
+                                                prefix = prefix.text,
+                                                params = params.map {
+                                                    JsonParam(it.key, it.value, it.type.name, it.isVisible)
+                                                }
+                                            )
+                                            Storage.saveConfig(configName.text, config)
+                                            configError = ""
+                                            isModified = false
+                                            configFiles = Storage.listConfigs()
+
+                                            // Charger la nouvelle configuration
+                                            loadConfig(configToLoad!!)
+
+                                            showSaveConfirmDialog = false
+                                            configToLoad = null
+                                        } catch (e: Exception) {
+                                            configError = "Erreur lors de la sauvegarde : ${e.message}"
+                                            showSaveConfirmDialog = false
+                                            configToLoad = null
+                                        }
+                                    }
+                                } else {
+                                    configError = "Le nom de la configuration ne peut pas être vide"
+                                    showSaveConfirmDialog = false
+                                    configToLoad = null
+                                }
+                            },
+                            enabled = configName.text.isNotBlank()
+                        ) {
+                            Text("Sauvegarder et charger")
+                        }
+                    },
+                    dismissButton = {
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Button(
+                                onClick = {
+                                    // Charger la nouvelle configuration sans sauvegarder
+                                    loadConfig(configToLoad!!)
+                                    showSaveConfirmDialog = false
+                                    configToLoad = null
+                                }
+                            ) {
+                                Text("Charger sans sauvegarder")
+                            }
+                            Button(
+                                onClick = {
+                                    // Annuler
+                                    showSaveConfirmDialog = false
+                                    configToLoad = null
+                                }
+                            ) {
+                                Text("Annuler")
+                            }
+                        }
+                    }
+                )
+            }
+
             // Popup de confirmation pour la suppression
             if (showDeleteConfirmDialog && fileToDelete != null) {
                 AlertDialog(
                     onDismissRequest = { showDeleteConfirmDialog = false },
                     title = { Text("Confirmer la suppression") },
-                    text = { Text("Voulez-vous vraiment supprimer la configuration ${fileToDelete?.nameWithoutExtension}?") },
+                    text = { Text("Voulez-vous vraiment supprimer la configuration $fileToDelete?") },
                     confirmButton = {
                         Button(
                             onClick = {
-                                try {
-                                    fileToDelete?.delete()
-                                    configFiles =
-                                        configDir.listFiles { _, name -> name.endsWith(".json") }?.toList()
-                                            ?: emptyList()
-                                    configError = ""
-                                    if (currentConfigFile == fileToDelete) {
-                                        currentConfigFile = null
-                                        configName = TextFieldValue("")
-                                        isModified = false
+                                scope.launch {
+                                    try {
+                                        Storage.deleteConfig(fileToDelete!!)
+                                        configFiles = Storage.listConfigs()
+                                        configError = ""
+                                        if (currentConfigFile == fileToDelete) {
+                                            currentConfigFile = null
+                                            configName = TextFieldValue("")
+                                            isModified = false
+                                        }
+                                        if (selectedConfig == fileToDelete) {
+                                            selectedConfig = null
+                                        }
+                                        showDeleteConfirmDialog = false
+                                    } catch (e: Exception) {
+                                        configError =
+                                            "Erreur lors de la suppression de $fileToDelete : ${e.message}"
                                     }
-                                    showDeleteConfirmDialog = false
-                                } catch (e: Exception) {
-                                    configError =
-                                        "Erreur lors de la suppression de ${fileToDelete?.name} : ${e.message}"
                                 }
                             }
                         ) {
@@ -878,22 +880,17 @@ fun detectParamType(value: String): ParamType {
 fun generateAdbCommand(intentName: String, prefix: String, params: List<Param>): String {
     if (intentName.isBlank()) return ""
 
-    var filtered = params.filter { it.value.isNotBlank() }
-
-    val paramString = filtered.joinToString(" ") { param ->
-        param.value.trim().takeIf { it.isNotBlank() }.let {
+    val paramString = params
+        .filter { it.value.isNotBlank() }
+        .joinToString(" ") { param ->
             buildString {
                 append(param.type.flag)
                 append(" ")
-                append(
-                    (prefix.toString() + param.key.toString()).encodeAdbParameter()
-                        .wrap()
-                )
+                append((prefix + param.key).encodeAdbParameter().wrap())
                 append(" ")
-                append(param.value.toString().escapeValue(param.type).encodeAdbParameter().wrap(param.type))
-            }.toString().trim().trimIndent()
-        }
-    }.takeIf { it.isNotEmpty() } ?: ""
+                append(param.value.escapeValue(param.type).encodeAdbParameter().wrap(param.type))
+            }.trim()
+        }.takeIf { it.isNotEmpty() } ?: ""
 
     return "adb shell am start -a ${intentName.wrap()} $paramString".trim()
 }
@@ -901,8 +898,9 @@ fun generateAdbCommand(intentName: String, prefix: String, params: List<Param>):
 private fun String.escapeValue(type: ParamType? = null): String {
     return if (type == ParamType.JSON) {
         this.replace("\"", "\\\"")
-    } else
+    } else {
         this
+    }
 }
 
 private fun String.wrap(type: ParamType? = null): String {
@@ -910,121 +908,12 @@ private fun String.wrap(type: ParamType? = null): String {
         "\"$this\""
     } else if (type == ParamType.JSON) {
         "\'$this\'"
-    } else this
+    } else {
+        this
+    }
 }
 
 // Encode les paramètres pour la commande ADB
 fun String.encodeAdbParameter(): String {
     return this.replace('"', '\"')
-}
-
-fun installApk() {
-    val workingDir = File("scrcpy-v1.25/")
-    val apkName = "middleman-debug.apk"
-    val commande = "adb install apk/$apkName"
-
-    executeCommand(commande)
-}
-
-fun executeCommandWithMiddleAPK(command: String, intentName: String): Pair<String, String> {
-    val uid = UUID.randomUUID().toString()
-
-    val target = "--es \"targetIntent\" \"$intentName\""
-    val tag = "--es \"uidResult\" \"$uid\""
-    var newComand = command.replace(intentName, "com.poly.intent.middleman") + " " + target + " " + tag
-
-    executeCommand("adb shell am force-stop com.poly.middleman") // close l'activity avant..
-
-    return Pair(newComand, uid)
-}
-
-fun executeCommand(command: String): String {
-    return try {
-        val workingDir = File("scrcpy-v1.25/")
-        val adbPath = "${workingDir.absolutePath}/adb.exe"
-
-        // use local adb
-        var localCommand = command.replace("adb", adbPath)
-        localCommand = localCommand.replace("apk/", "${workingDir.absolutePath}/../apk/")
-        var commandSplit = localCommand.split(" ")
-
-        println("Execute : ${localCommand}")
-
-        // Créer un ProcessBuilder pour exécuter la commande
-        val process = ProcessBuilder(commandSplit).directory(File("scrcpy-v1.25/")).start()
-
-        // Lire la sortie de la commande
-        val reader = BufferedReader(InputStreamReader(process.inputStream))
-        val output = reader.readLines().joinToString("\n")
-
-        // Attendre que le processus se termine
-        process.waitFor()
-
-        // Vérifier si le processus s'est terminé avec succès
-        if (process.exitValue() == 0) {
-            output
-        } else {
-            "Erreur lors de l'exécution de la commande."
-        }
-    } catch (e: Exception) {
-        println("Erreur : ${e.message}")
-        e.message ?: "Erreur inconnue durant l'execution de la commande"
-    }
-}
-
-fun executeCommandAsync(command: String): Process {
-    val workingDir = File("scrcpy-v1.25/")
-    val adbPath = "${workingDir.absolutePath}/adb.exe"
-
-    // use local adb
-    var localCommand = command.replace("adb", adbPath)
-    localCommand = localCommand.replace("apk/", "${workingDir.absolutePath}/../apk/")
-    var commandSplit = localCommand.split(" ")
-
-    println("Execute : ${localCommand}")
-
-    // Créer un ProcessBuilder pour exécuter la commande
-    return ProcessBuilder(commandSplit).directory(File("scrcpy-v1.25/")).start()
-}
-
-suspend fun listenLogcat(uid: String): String {
-    var process: Process? = null
-    var reader: BufferedReader? = null
-    return try {
-        println("Écoute du logcat: cherche ResultTag_UID:$uid pour le package com.poly.middleman")
-
-        // Nettoyer les logs précédents
-        executeCommand("adb logcat -c")
-
-        // Lancer adb logcat avec un filtre par package, tag, et durée maximale de 10 secondes
-        val logcatCommand = "adb logcat com.poly.middleman:D -T 600"
-        println("Commande Logcat : $logcatCommand")
-
-        process = executeCommandAsync(logcatCommand)
-
-        reader = BufferedReader(InputStreamReader(process.inputStream))
-        var line: String?
-
-        while (true) {
-            reader.readLine().also { line = it }
-//            println(uid)
-//            println(line)
-            if (line?.contains(uid) == true) {
-                val result = line.substringAfter("$uid").trim()
-                val message = result
-                print(message)
-                return message
-            }
-        }
-
-        println("Erreur : Aucun résultat trouvé dans les logs pour UID:$uid")
-        "Erreur : Aucun résultat trouvé dans les logs pour UID:$uid"
-    } catch (e: Exception) {
-        println("Erreur lors de l'écoute des logs : ${e.message}")
-        "Erreur lors de l'écoute des logs : ${e.message}"
-    } finally {
-        reader?.close()
-        process?.destroy()
-        println("Processus Logcat arrêté pour UID:$uid")
-    }
 }

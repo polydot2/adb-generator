@@ -1,4 +1,4 @@
-package com.poly.devtop.screens
+package com.poly.devtop.old
 
 import androidx.compose.desktop.ui.tooling.preview.Preview
 import androidx.compose.foundation.layout.*
@@ -11,8 +11,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.unit.dp
-import com.poly.devtop.GitIntereactor
-import com.poly.devtop.JiraInteractor
 import java.io.File
 
 // Map de configuration : étiquette JIRA -> chemin du dépôt

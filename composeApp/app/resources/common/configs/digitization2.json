@@ -1,6 +1,6 @@
 {
-    "intentName": "fr.laposte.dsibr.intent.digitization",
-    "prefix": "fr.laposte.dsibr.digitization.",
+    "intentName": "fr.laposte.dsibr.intent.digitizationsd",
+    "prefix": "fr.laposte.dsibr.digitization.sd",
     "params": [
         {
             "key": "caller",

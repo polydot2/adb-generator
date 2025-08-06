@@ -1,0 +1,41 @@
+{
+    "intentName": "android.intent.action.VIEW",
+    "prefix": "check.id.",
+    "params": [
+        {
+            "key": "caller",
+            "value": "{\"caller\":\"thisisme\"}",
+            "type": "JSON"
+        },
+        {
+            "key": "should",
+            "value": "true",
+            "type": "BOOLEAN"
+        },
+        {
+            "key": "important",
+            "value": "false",
+            "type": "BOOLEAN"
+        },
+        {
+            "key": "howmany",
+            "value": "42",
+            "type": "INT"
+        },
+        {
+            "key": "name",
+            "value": "Jean",
+            "type": "STRING"
+        },
+        {
+            "key": "country",
+            "value": "brazil,montevideo",
+            "type": "ARRAY_STRING"
+        },
+        {
+            "key": "enum",
+            "value": "ENABLED",
+            "type": "STRING"
+        }
+    ]
+}
