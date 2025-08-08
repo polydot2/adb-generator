@@ -5,7 +5,6 @@ composeMultiplatform = "1.8.2"
 kotlin = "2.2.0"
 kotlinxcoroutines = "1.10.2"
 
-
 jgit = "7.3.0.202506031305-r"
 
 ktor = "2.3.13"
