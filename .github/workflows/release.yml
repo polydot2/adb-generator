@@ -27,8 +27,8 @@ jobs:
       - name: Set up Gradle
         uses: gradle/gradle-build-action@v3
 
-      # Grant executable permission to gradlew
       - name: Make gradlew executable
+        if: runner.os != 'Windows'
         run: chmod +x ./gradlew
 
       # Build the artifact
@@ -38,14 +38,14 @@ jobs:
       # Zip the distribution folder
       - name: Zip the distribution folder
         run: |
-          if [ -d ./composeApp/build/dist/main-release/app ]; then
-            cd ./composeApp/build/dist/main-release/app
-            zip -r release.${{ github.ref_name }}.zip .
-          else
-            echo "Distribution folder not found"
+          if (Test-Path ./composeApp/build/dist/main-release/app) {
+            Set-Location ./composeApp/build/dist/main-release/app
+            Compress-Archive -Path . -DestinationPath release.${{ github.ref_name }}.zip
+          } else {
+            Write-Output "Distribution folder not found"
             exit 1
-          fi
-        shell: bash
+          }
+        shell: pwsh # Use PowerShell instead of bash
 
       # Create a GitHub Release
       - name: Create Release
