@@ -1,0 +1,73 @@
+name: Build and Release Compose Desktop Artifact
+
+on:
+  push:
+    tags:
+      - '*.*.*' # Trigger on tags like 1.0.0 (no 'v' prefix)
+
+jobs:
+  build-and-release:
+    runs-on: windows-latest # Utilise un runner Windows
+    permissions:
+      contents: write # Required for creating releases and uploading assets
+
+    steps:
+      # Checkout the repository
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      # Set up JDK
+      - name: Set up JDK
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17' # Adjust to your project's JDK version
+          distribution: 'temurin'
+
+      # Set up Gradle
+      - name: Set up Gradle
+        uses: gradle/gradle-build-action@v3
+
+      # Grant executable permission to gradlew
+      - name: Make gradlew executable
+        run: chmod +x ./gradlew
+
+      # Build the artifact
+      - name: Build and package artifact
+        run: ./gradlew createReleaseDistributable
+
+      # Zip the distribution folder
+      - name: Zip the distribution folder
+        run: |
+          if [ -d ./composeApp/build/dist/main-release/app ]; then
+            cd ./composeApp/build/dist/main-release/app
+            zip -r release.${{ github.ref_name }}.zip .
+          else
+            echo "Distribution folder not found"
+            exit 1
+          fi
+        shell: bash
+
+      # Create a GitHub Release
+      - name: Create Release
+        id: create_release
+        uses: actions/create-release@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: ${{ github.ref_name }} # e.g., 1.0.0
+          release_name: Release ${{ github.ref_name }}
+          draft: false
+          prerelease: false
+          body: |
+            Automated release for ${{ github.ref_name }}
+
+      # Upload the zipped artifact to the release
+      - name: Upload Release Artifact
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ steps.create_release.outputs.upload_url }}
+          asset_path: ./composeApp/build/dist/main-release/app/release.${{ github.ref_name }}.zip
+          asset_name: release.${{ github.ref_name }}.zip
+          asset_content_type: application/zip
