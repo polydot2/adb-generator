@@ -21,8 +21,7 @@ import com.poly.devtop.data.*
 import com.poly.devtop.multi.Adb
 import com.poly.devtop.multi.Clipboard
 import com.poly.devtop.multi.FilePicker
-import kotlinx.coroutines.delay
-import kotlinx.coroutines.launch
+import kotlinx.coroutines.*
 import kotlinx.serialization.json.Json
 
 @Composable
@@ -54,6 +53,7 @@ fun PostAdbScreen() {
     val scope = rememberCoroutineScope()
     var logCatListening by remember { mutableStateOf(false) }
     var resultFromApk by remember { mutableStateOf("") }
+    var job: Job? = null
 
     // Charge les configs au démarrage
     LaunchedEffect(Unit) {
@@ -165,19 +165,19 @@ fun PostAdbScreen() {
                     ) {
                         Text("Générateur de commande ADB", style = MaterialTheme.typography.headlineMedium)
                         Spacer(Modifier.weight(1f))
-//                        Button(
-//                            onClick = {
-//                                scope.launch {
-//                                    val result = Adb.installApk()
-//                                    toastMessage = result
-//                                    showToast = true
-//                                    delay(4000)
-//                                    showToast = false
-//                                }
-//                            }
-//                        ) {
-//                            Text("Install middleMan.apk")
-//                        }
+                        Button(
+                            onClick = {
+                                scope.launch {
+                                    val result = Adb.installApk()
+                                    toastMessage = result
+                                    showToast = true
+                                    delay(4000)
+                                    showToast = false
+                                }
+                            }
+                        ) {
+                            Text("Install middleMan.apk")
+                        }
                     }
 
                     // Boutons pour sauvegarder et charger les configurations
@@ -351,28 +351,32 @@ fun PostAdbScreen() {
                                     modifier = Modifier.weight(1f),
                                     color = MaterialTheme.colorScheme.primary
                                 )
-//                                IconButton(
-//                                    onClick = {
-//                                        scope.launch {
-//                                            adbCommand = generateAdbCommand(
-//                                                intentName.text,
-//                                                prefix.text,
-//                                                params.filter { it.isVisible && it.key.isNotBlank() })
-//                                            resultFromApk = ""
-//                                            val (newCommand, uid) = Adb.executeCommandWithMiddleApk(
-//                                                adbCommand,
-//                                                intentName.text
-//                                            )
-//                                            Adb.executeCommand(newCommand)
-//                                            logCatListening = true
-//                                            val logcatResult = Adb.listenLogcat(uid)
-//                                            logCatListening = false
-//                                            resultFromApk = logcatResult
-//                                        }
-//                                    }
-//                                ) {
-//                                    Icon(Icons.Default.PlayForWork, contentDescription = "Lancer a travers middleMan")
-//                                }
+                                IconButton(
+                                    onClick = {
+                                        job = scope.launch(Dispatchers.Main) {
+                                            adbCommand = generateAdbCommand(
+                                                intentName.text,
+                                                prefix.text,
+                                                params.filter { it.isVisible && it.key.isNotBlank() })
+                                            resultFromApk = ""
+
+                                            val (newCommand, uid) = Adb.executeCommandWithMiddleApk(
+                                                adbCommand,
+                                                intentName.text
+                                            )
+                                            Adb.executeCommand(newCommand)
+                                            logCatListening = true
+
+                                            val logcatResult = withContext(Dispatchers.Default) {
+                                                Adb.listenLogcat(uid)
+                                            }
+                                            logCatListening = false
+                                            resultFromApk = logcatResult
+                                        }
+                                    }
+                                ) {
+                                    Icon(Icons.Default.PlayForWork, contentDescription = "Lancer a travers middleMan")
+                                }
                             }
                         }
                     }
@@ -515,6 +519,14 @@ fun PostAdbScreen() {
                                     if (logCatListening) "En attente de réponse" else "Reponse",
                                     style = MaterialTheme.typography.titleLarge
                                 )
+                                if (logCatListening) {
+                                    Button(onClick = {
+                                        job?.cancel() // Cancels the entire coroutine, including the IO thread
+                                        logCatListening = false
+                                    }) {
+                                        Text("Annuler")
+                                    }
+                                }
                             }
                             Text(resultFromApk)
                         }

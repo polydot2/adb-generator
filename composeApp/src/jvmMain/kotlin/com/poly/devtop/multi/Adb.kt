@@ -34,12 +34,18 @@ actual object Adb {
     actual suspend fun executeCommand(command: String): String {
         return try {
             val adbPath = "${workingDir.absolutePath}/adb.exe"
+
             val localCommand = command.replace("adb", adbPath)
                 .replace("apk/", "${workingDir.absolutePath}/apk/")
+
+            print(localCommand)
+
             val commandSplit = localCommand.split(" ")
             val process = ProcessBuilder(commandSplit).directory(workingDir).start()
             val output = BufferedReader(InputStreamReader(process.inputStream)).readLines().joinToString("\n")
+
             process.waitFor()
+
             if (process.exitValue() == 0) output else "Erreur lors de l'exécution"
         } catch (e: Exception) {
             e.message ?: "Erreur inconnue"
@@ -58,8 +64,10 @@ actual object Adb {
     actual suspend fun listenLogcat(uid: String): String {
         return try {
             executeCommand("adb logcat -c")
-            val process = ProcessBuilder("adb", "logcat", "com.poly.middleman:D", "-T", "600").start()
+
+            val process = ProcessBuilder("${workingDir.absolutePath}/adb", "logcat", "com.poly.middleman:D", "-T", "600").start()
             val reader = BufferedReader(InputStreamReader(process.inputStream))
+
             var line: String?
             while (reader.readLine().also { line = it } != null) {
                 if (line?.contains(uid) == true) {
@@ -75,9 +83,6 @@ actual object Adb {
     }
 
     actual suspend fun installApk(): String {
-        val workingDir = File("scrcpy-v1.25/")
-        val apkName = "middleman-debug.apk"
-        val command = "adb install apk/$apkName"
-        return executeCommand(command)
+        return executeCommand("adb install apk/middleman.apk")
     }
 }
