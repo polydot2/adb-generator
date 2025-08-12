@@ -63,26 +63,63 @@ actual object Adb {
 
     actual suspend fun listenLogcat(uid: String): String {
         return try {
+            // Nettoyer le buffer de logcat
             executeCommand("adb logcat -c")
 
+            // Lancer adb logcat avec le filtre pour com.poly.middleman:D
             val process = ProcessBuilder("${workingDir.absolutePath}/adb", "logcat", "com.poly.middleman:D", "-T", "600").start()
             val reader = BufferedReader(InputStreamReader(process.inputStream))
+            val resultBuilder = StringBuilder()
+            var foundUid = false
+            var currentTag: String? = null
 
             var line: String?
             while (reader.readLine().also { line = it } != null) {
-                if (line?.contains(uid) == true) {
-                    val result = line.substringAfter("$uid").trim()
-                    process.destroy()
-                    return result
+                line?.let { logLine ->
+                    // Extraire le tag (entre le premier espace après le timestamp/PID et le package)
+                    val tagStart = logLine.indexOf(" ", logLine.indexOf(" ") + 1) + 1
+                    val tagEnd = logLine.indexOf(" ", tagStart)
+                    val tag = logLine.substring(tagStart, tagEnd).trim()
+
+                    // Vérifier si la ligne contient l'UID
+                    if (logLine.contains(uid)) {
+                        foundUid = true
+                        currentTag = tag // Enregistrer le tag courant (peut être tronqué)
+                        // Extraire le message après le niveau de priorité (D)
+                        val messageStart = logLine.indexOf(" D ") + 3
+                        var message = logLine.substring(messageStart).trim()
+                        // Nettoyer le tag ou tout préfixe indésirable
+                        message = message.replace(Regex("^ResultTag_UID:.*?:\\s*"), "").trim()
+                        resultBuilder.append(message)
+                        resultBuilder.append("\n")
+                    } else if (foundUid && tag == currentTag) {
+                        // Ajouter les lignes suivantes avec le même tag
+                        val messageStart = logLine.indexOf(" D ") + 3
+                        var message = logLine.substring(messageStart).trim()
+                        // Nettoyer le tag ou tout préfixe indésirable
+                        message = message.replace(Regex("^ResultTag_UID:.*?:\\s*"), "").trim()
+                        resultBuilder.append(message)
+                        resultBuilder.append("\n")
+                    } else if (foundUid && tag != currentTag) {
+                        // Arrêter si le tag change
+                        process.destroy()
+                        return resultBuilder.toString().trim()
+                    }
                 }
             }
-            "Erreur : Aucun résultat trouvé"
+
+            process.destroy()
+            if (foundUid) {
+                return resultBuilder.toString().trim()
+            } else {
+                "Erreur : Aucun résultat trouvé pour l'UID $uid"
+            }
         } catch (e: Exception) {
             "Erreur lors de l'écoute : ${e.message}"
         }
     }
 
     actual suspend fun installApk(): String {
-        return executeCommand("adb install apk/middleman.apk")
+        return executeCommand("adb install apk/middleman-debug.apk")
     }
 }

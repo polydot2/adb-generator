@@ -331,12 +331,16 @@ fun PostAdbScreen() {
                                 }
                                 IconButton(
                                     onClick = {
-                                        scope.launch {
+                                        scope.launch(Dispatchers.Main) {
                                             adbCommand = generateAdbCommand(
                                                 intentName.text,
                                                 prefix.text,
                                                 params.filter { it.isVisible && it.key.isNotBlank() })
-                                            val output = Adb.executeCommand(adbCommand)
+
+                                            val output = withContext(Dispatchers.Default) {
+                                                Adb.executeCommand(adbCommand)
+                                            }
+
                                             toastMessage = output
                                             showToast = true
                                             delay(4000)
@@ -378,6 +382,51 @@ fun PostAdbScreen() {
                                     Icon(Icons.Default.PlayForWork, contentDescription = "Lancer a travers middleMan")
                                 }
                             }
+                        }
+                    }
+
+                    // Response
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(
+                            Modifier.background(
+                                color = MaterialTheme.colorScheme.surface,
+                                shape = RoundedCornerShape(8.dp)
+                            ).padding(16.dp).fillMaxWidth()
+                        ) {
+                            Row {
+                                if (logCatListening) {
+                                    CircularProgressIndicator(modifier = Modifier.size(24.dp))
+                                    Spacer(Modifier.width(12.dp))
+                                }
+                                Text(
+                                    if (logCatListening) "En attente de réponse" else "Réponse",
+                                    style = MaterialTheme.typography.titleLarge
+                                )
+                                Spacer(Modifier.weight((1f)))
+                                if (logCatListening) {
+                                    Button(onClick = {
+                                        job?.cancel() // Cancels the entire coroutine, including the IO thread
+                                        logCatListening = false
+                                    }) {
+                                        Text("Annuler")
+                                    }
+                                }
+                                if (logCatListening == false && resultFromApk.isNotBlank())
+                                    IconButton(
+                                        onClick = {
+                                            scope.launch {
+                                                Clipboard.copyToClipboard(resultFromApk)
+                                            }
+                                        }
+                                    ) {
+                                        Icon(Icons.Default.ContentCopy, contentDescription = "Copier")
+                                    }
+                            }
+                            Text(resultFromApk)
                         }
                     }
 
@@ -496,39 +545,6 @@ fun PostAdbScreen() {
                             ) {
                                 Icon(Icons.Default.Delete, contentDescription = "Supprimer")
                             }
-                        }
-                    }
-
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Column(
-                            Modifier.background(
-                                color = MaterialTheme.colorScheme.surface,
-                                shape = RoundedCornerShape(8.dp)
-                            ).padding(16.dp).fillMaxWidth()
-                        ) {
-                            Row {
-                                if (logCatListening) {
-                                    CircularProgressIndicator(modifier = Modifier.size(24.dp))
-                                    Spacer(Modifier.width(12.dp))
-                                }
-                                Text(
-                                    if (logCatListening) "En attente de réponse" else "Reponse",
-                                    style = MaterialTheme.typography.titleLarge
-                                )
-                                if (logCatListening) {
-                                    Button(onClick = {
-                                        job?.cancel() // Cancels the entire coroutine, including the IO thread
-                                        logCatListening = false
-                                    }) {
-                                        Text("Annuler")
-                                    }
-                                }
-                            }
-                            Text(resultFromApk)
                         }
                     }
                 }
@@ -718,6 +734,7 @@ fun PostAdbScreen() {
                                             verticalAlignment = Alignment.CenterVertically
                                         ) {
                                             Text(file)
+                                            if(file != "com.poly.middleman")
                                             IconButton(
                                                 onClick = {
                                                     fileToDelete = file
