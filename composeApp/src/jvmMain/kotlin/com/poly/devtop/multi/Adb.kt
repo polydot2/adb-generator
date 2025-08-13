@@ -56,7 +56,7 @@ actual object Adb {
         val uid = UUID.randomUUID().toString()
         val target = "--es \"targetIntent\" \"$intentName\""
         val tag = "--es \"uidResult\" \"$uid\""
-        val newCommand = command.replace(intentName, "com.poly.intent.middleman") + " $target $tag"
+        val newCommand = command.replace("-a \"$intentName\"", "-a \"com.poly.intent.middleman\"") + " $target $tag"
         executeCommand("adb shell am force-stop com.poly.middleman")
         return Pair(newCommand, uid)
     }
